@@ -9,6 +9,7 @@ This is a small program that will help copy messages from one IMAP folder to ano
 1. Open up the imapsync.rb file and edit lines 6 - 19 as needed.
 1. You will need to provide a host name, user name, and password for the source account and the destination account.
 1. You can optionally change the UID\_BLOCK\_SIZE if necessary.
+1. To automatically discover IMAP folders to sync, use the `--dynamic_folder_map` option when executing the script.
 
 # Thanks
 

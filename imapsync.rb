@@ -1,6 +1,11 @@
 #!/usr/bin/env ruby
 require 'net/imap'
+require 'trollop'
 
+opts = Trollop::options do
+   opt :dynamic_folder_map, "Build folder map based on IMAP search"
+end
+   
 # Source server connection info.
 SOURCE_HOST = 'imap.gmail.com'
 SOURCE_PORT = 993
@@ -66,6 +71,11 @@ dest = Net::IMAP.new(DEST_HOST, DEST_PORT, DEST_SSL)
 
 dd 'logging in...'
 dest.login(DEST_USER, DEST_PASS)
+
+# build folder map if cmd line option was passed
+if opts[:dynamic_folder_map] do
+   FOLDERS = get_folders(ds)
+end
 
 # Loop through folders and copy messages.
 FOLDERS.each do |source_folder, dest_folder|
