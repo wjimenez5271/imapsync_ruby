@@ -28,6 +28,16 @@ FOLDERS = {
 }
 
 # Utility methods.
+def get_folders(imap_obj)
+   # Build a mapping of folders from IMAP folder search
+   folders = imap_obj.list('', '*')  # Returns a list of Net::IMAP::MailboxList objects
+   folder_map = {}
+   folders.each do
+      puts "Discovered folder: #{folder.name}"
+      folder_map[folder.name] => folder.name
+   end
+   return folder_map
+
 def dd(message)
    puts "[#{DEST_HOST}: #{DEST_USER}] #{message}"
 end
