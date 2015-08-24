@@ -5,7 +5,7 @@ require 'trollop'
 opts = Trollop::options do
    opt :dynamic_folder_map, "Build folder map based on IMAP search"
 end
-   
+
 # Source server connection info.
 SOURCE_HOST = 'imap.gmail.com'
 SOURCE_PORT = 993
@@ -39,9 +39,10 @@ def get_folders(imap_obj)
    folder_map = {}
    folders.each do
       puts "Discovered folder: #{folder.name}"
-      folder_map[folder.name] => folder.name
+      folder_map[folder.name] = folder.name
    end
    return folder_map
+end
 
 def dd(message)
    puts "[#{DEST_HOST}: #{DEST_USER}] #{message}"
@@ -73,7 +74,7 @@ dd 'logging in...'
 dest.login(DEST_USER, DEST_PASS)
 
 # build folder map if cmd line option was passed
-if opts[:dynamic_folder_map] do
+if opts[:dynamic_folder_map]
    FOLDERS = get_folders(ds)
 end
 
@@ -87,7 +88,7 @@ FOLDERS.each do |source_folder, dest_folder|
     ds "error: select failed: #{e}"
     next
   end
-  
+
   # Open (or create) destination folder in read-write mode.
   begin
     dd "selecting folder '#{dest_folder}'..."
@@ -102,10 +103,10 @@ FOLDERS.each do |source_folder, dest_folder|
       next
     end
   end
-  
+
   # Build a lookup hash of all message ids present in the destination folder.
   dest_info = {}
-  
+
   dd 'analyzing existing messages...'
   uids = dest.uid_search(['ALL'])
   dd "found #{uids.length} messages"
@@ -114,7 +115,7 @@ FOLDERS.each do |source_folder, dest_folder|
       dest_info[data.attr['ENVELOPE'].message_id] = true
     end
   end
-  
+
   # Loop through all messages in the source folder.
   uids = source.uid_search(['ALL'])
   ds "found #{uids.length} messages"
@@ -124,12 +125,12 @@ FOLDERS.each do |source_folder, dest_folder|
 
       # If this message is already in the destination folder, skip it.
       next if dest_info[mid]
-    
+
       # Download the full message body from the source folder.
       ds "downloading message #{mid}..."
       msg = source.uid_fetch(data.attr['UID'], ['RFC822', 'FLAGS',
           'INTERNALDATE']).first
-    
+
       # Append the message to the destination folder, preserving flags and
       # internal timestamp.
       dd "storing message #{mid}..."
@@ -144,7 +145,7 @@ FOLDERS.each do |source_folder, dest_folder|
 
     end
   end
-  
+
   source.close
   dest.close
 end
