@@ -4,6 +4,7 @@ require 'trollop'
 
 opts = Trollop::options do
    opt :dynamic_folder_map, "Build folder map based on IMAP search"
+   opt :max_retry, "Number of times to retry after IMAP connection timeout"
 end
 
 # Source server connection info.
@@ -60,94 +61,112 @@ def uid_fetch_block(server, uids, *args)
   end
 end
 
-# Connect and log into both servers.
-ds 'connecting...'
-source = Net::IMAP.new(SOURCE_HOST, SOURCE_PORT, SOURCE_SSL)
+def process_mail_queue
+  # Connect and log into both servers.
+  ds 'connecting...'
+  source = Net::IMAP.new(SOURCE_HOST, SOURCE_PORT, SOURCE_SSL)
 
-ds 'logging in...'
-source.login(SOURCE_USER, SOURCE_PASS)
+  ds 'logging in...'
+  source.login(SOURCE_USER, SOURCE_PASS)
 
-dd 'connecting...'
-dest = Net::IMAP.new(DEST_HOST, DEST_PORT, DEST_SSL)
+  dd 'connecting...'
+  dest = Net::IMAP.new(DEST_HOST, DEST_PORT, DEST_SSL)
 
-dd 'logging in...'
-dest.login(DEST_USER, DEST_PASS)
+  dd 'logging in...'
+  dest.login(DEST_USER, DEST_PASS)
 
-# build folder map if cmd line option was passed
-if opts[:dynamic_folder_map]
-   FOLDERS = get_folders(ds)
-end
-
-# Loop through folders and copy messages.
-FOLDERS.each do |source_folder, dest_folder|
-  # Open source folder in read-only mode.
-  begin
-    ds "selecting folder '#{source_folder}'..."
-    source.examine(source_folder)
-  rescue => e
-    ds "error: select failed: #{e}"
-    next
+  # build folder map if cmd line option was passed
+  if opts[:dynamic_folder_map]
+     FOLDERS = get_folders(ds)
   end
-
-  # Open (or create) destination folder in read-write mode.
-  begin
-    dd "selecting folder '#{dest_folder}'..."
-    dest.select(dest_folder)
-  rescue => e
+  # Loop through folders and copy messages.
+  FOLDERS.each do |source_folder, dest_folder|
+    # Open source folder in read-only mode.
     begin
-      dd "folder not found; creating..."
-      dest.create(dest_folder)
-      dest.select(dest_folder)
-    rescue => ee
-      dd "error: could not create folder: #{e}"
+      ds "selecting folder '#{source_folder}'..."
+      source.examine(source_folder)
+    rescue => e
+      ds "error: select failed: #{e}"
       next
     end
-  end
 
-  # Build a lookup hash of all message ids present in the destination folder.
-  dest_info = {}
-
-  dd 'analyzing existing messages...'
-  uids = dest.uid_search(['ALL'])
-  dd "found #{uids.length} messages"
-  if uids.length > 0
-    uid_fetch_block(dest, uids, ['ENVELOPE']) do |data|
-      dest_info[data.attr['ENVELOPE'].message_id] = true
-    end
-  end
-
-  # Loop through all messages in the source folder.
-  uids = source.uid_search(['ALL'])
-  ds "found #{uids.length} messages"
-  if uids.length > 0
-    uid_fetch_block(source, uids, ['ENVELOPE']) do |data|
-      mid = data.attr['ENVELOPE'].message_id
-
-      # If this message is already in the destination folder, skip it.
-      next if dest_info[mid]
-
-      # Download the full message body from the source folder.
-      ds "downloading message #{mid}..."
-      msg = source.uid_fetch(data.attr['UID'], ['RFC822', 'FLAGS',
-          'INTERNALDATE']).first
-
-      # Append the message to the destination folder, preserving flags and
-      # internal timestamp.
-      dd "storing message #{mid}..."
-      success = false
+    # Open (or create) destination folder in read-write mode.
+    begin
+      dd "selecting folder '#{dest_folder}'..."
+      dest.select(dest_folder)
+    rescue => e
       begin
-        dest.append(dest_folder, msg.attr['RFC822'], msg.attr['FLAGS'], msg.attr['INTERNALDATE'])
-        success = true
-      rescue Net::IMAP::NoResponseError => e
-        puts "Got exception: #{e.message}. Retrying..."
-        sleep 1
-      end until success
-
+        dd "folder not found; creating..."
+        dest.create(dest_folder)
+        dest.select(dest_folder)
+      rescue => ee
+        dd "error: could not create folder: #{e}"
+        next
+      end
     end
+
+    # Build a lookup hash of all message ids present in the destination folder.
+    dest_info = {}
+
+    dd 'analyzing existing messages...'
+    uids = dest.uid_search(['ALL'])
+    dd "found #{uids.length} messages"
+    if uids.length > 0
+      uid_fetch_block(dest, uids, ['ENVELOPE']) do |data|
+        dest_info[data.attr['ENVELOPE'].message_id] = true
+      end
+    end
+
+    # Loop through all messages in the source folder.
+    uids = source.uid_search(['ALL'])
+    ds "found #{uids.length} messages"
+    if uids.length > 0
+      uid_fetch_block(source, uids, ['ENVELOPE']) do |data|
+        mid = data.attr['ENVELOPE'].message_id
+
+        # If this message is already in the destination folder, skip it.
+        next if dest_info[mid]
+
+        # Download the full message body from the source folder.
+        ds "downloading message #{mid}..."
+        msg = source.uid_fetch(data.attr['UID'], ['RFC822', 'FLAGS',
+            'INTERNALDATE']).first
+
+        # Append the message to the destination folder, preserving flags and
+        # internal timestamp.
+        dd "storing message #{mid}..."
+        success = false
+        begin
+          dest.append(dest_folder, msg.attr['RFC822'], msg.attr['FLAGS'], msg.attr['INTERNALDATE'])
+          success = true
+        rescue Net::IMAP::NoResponseError => e
+          puts "Got exception: #{e.message}. Retrying..."
+          sleep 1
+        end until success
+
+      end
+    end
+
+    source.close
+    dest.close
   end
 
-  source.close
-  dest.close
+  puts 'done'
 end
 
-puts 'done'
+
+# actual control flow
+retries = 0
+max_retry = 5
+if opts[:max_retry]
+  max_retry = opts[:max_retry]
+end
+
+begin
+  process_mail_queue
+rescue Net::IMAP::ByeResponseError
+  retry_count = retries + 1
+  if retries < max_retry
+    process_mail_queue
+  end
+end
